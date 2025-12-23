@@ -8,13 +8,22 @@ import { Coins, Loader2 } from "lucide-react";
 import { getErrorMessage } from "@/lib/errors";
 
 export default function FaucetClaim() {
-    const { contract, refreshBalance, isConnected } = useWeb3Store();
+    const { contract, refreshBalance, isConnected, account } = useWeb3Store();
     const [loading, setLoading] = useState(false);
 
     const handleClaim = async () => {
-        if (!contract) return;
+        if (!contract || !account) return;
         try {
             setLoading(true);
+
+            // Step 1: Check if user has already claimed
+            const hasClaimed = await contract.hasClaimedFaucet(account);
+            if (hasClaimed) {
+                toast.error("You have already claimed from the faucet");
+                return;
+            }
+
+            // Step 2: Execute the actual transaction
             const tx = await contract.claimFaucet();
             toast.info("Transaction sent! Waiting for confirmation...");
             await tx.wait();

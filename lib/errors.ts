@@ -1,6 +1,5 @@
 // Friendly error messages for contract errors
 const ERROR_NAMES: Record<string, string> = {
-    'AlreadyClaimedFaucet': 'You have already claimed from the faucet',
     'TransferToZeroAddress': 'Cannot transfer to zero address',
     'TransferFromZeroAddress': 'Cannot transfer from zero address',
     'InsufficientBalance': 'Insufficient token balance',
@@ -33,10 +32,6 @@ export function getErrorMessage(error: any): string {
     const message = error?.message || error?.reason || '';
 
     if (message.includes('execution reverted') || error?.code === 'CALL_EXCEPTION' || errorString.includes('CALL_EXCEPTION')) {
-        // For faucet - check transaction data in error or stringified version
-        if (errorString.includes('0x4fe15335')) {
-            return 'You have already claimed from the faucet';
-        }
         return 'Transaction failed. Please check your inputs.';
     }
 
