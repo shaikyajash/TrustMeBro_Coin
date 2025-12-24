@@ -10,8 +10,13 @@ import { ethers } from "ethers";
 import { Send, Loader2 } from "lucide-react";
 import { getErrorMessage } from "@/lib/errors";
 
+interface TransferFormData {
+    to: string;
+    amount: string;
+}
+
 export default function TransferForm() {
-    const { contract, refreshBalance, isConnected } = useWeb3Store();
+    const { contract, refreshBalance, isConnected, isPaused, balance } = useWeb3Store();
     const [loading, setLoading] = useState(false);
     const [to, setTo] = useState("");
     const [amount, setAmount] = useState("");
@@ -19,10 +24,23 @@ export default function TransferForm() {
     const handleTransfer = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!contract) return;
+
+        if (isPaused) {
+            toast.error("Contract is currently paused");
+            return;
+        }
+
+        if (parseFloat(amount) > parseFloat(balance)) {
+            toast.error("Insufficient token balance");
+            return;
+        }
+
         try {
             setLoading(true);
             const formattedAmount = ethers.parseUnits(amount, 18);
+
             const tx = await contract.transfer(to, formattedAmount);
+
             toast.info("Transfer initiated...");
             await tx.wait();
             toast.success("Transfer successful!");
@@ -31,6 +49,13 @@ export default function TransferForm() {
             await refreshBalance();
         } catch (error: any) {
             console.error(error);
+            try {
+                const formattedAmount = ethers.parseUnits(amount, 18);
+                await contract.transfer.staticCall(to, formattedAmount);
+            } catch (staticError: any) {
+                toast.error(getErrorMessage(staticError));
+                return;
+            }
             toast.error(getErrorMessage(error));
         } finally {
             setLoading(false);

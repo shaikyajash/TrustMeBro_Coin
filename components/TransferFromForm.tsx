@@ -10,8 +10,14 @@ import { ethers } from "ethers";
 import { ArrowRightLeft, Loader2 } from "lucide-react";
 import { getErrorMessage } from "@/lib/errors";
 
+interface TransferFromFormData {
+    from: string;
+    to: string;
+    amount: string;
+}
+
 export default function TransferFromForm() {
-    const { contract, refreshBalance, isConnected } = useWeb3Store();
+    const { contract, refreshBalance, isConnected, isPaused, account } = useWeb3Store();
     const [loading, setLoading] = useState(false);
     const [from, setFrom] = useState("");
     const [to, setTo] = useState("");
@@ -20,9 +26,40 @@ export default function TransferFromForm() {
     const handleTransferFrom = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!contract) return;
+
+        if (isPaused) {
+            toast.error("Contract is currently paused");
+            return;
+        }
+
+        if (!ethers.isAddress(from) || !ethers.isAddress(to)) {
+            toast.error("Invalid address format");
+            return;
+        }
+
+        if (from === ethers.ZeroAddress || to === ethers.ZeroAddress) {
+            toast.error("Cannot transfer to/from zero address");
+            return;
+        }
+
         try {
             setLoading(true);
+            const allowance = await contract.allowance(from, account);
             const formattedAmount = ethers.parseUnits(amount, 18);
+
+            if (allowance < formattedAmount) {
+                toast.error("Insufficient allowance. Please approve first.");
+                setLoading(false);
+                return;
+            }
+
+            const balance = await contract.balanceOf(from);
+            if (balance < formattedAmount) {
+                toast.error("Insufficient token balance");
+                setLoading(false);
+                return;
+            }
+
             const tx = await contract.transferFrom(from, to, formattedAmount);
             toast.info("TransferFrom initiated...");
             await tx.wait();
@@ -33,6 +70,13 @@ export default function TransferFromForm() {
             await refreshBalance();
         } catch (error: any) {
             console.error(error);
+            try {
+                const formattedAmount = ethers.parseUnits(amount, 18);
+                await contract.transferFrom.staticCall(from, to, formattedAmount);
+            } catch (staticError: any) {
+                toast.error(getErrorMessage(staticError));
+                return;
+            }
             toast.error(getErrorMessage(error));
         } finally {
             setLoading(false);

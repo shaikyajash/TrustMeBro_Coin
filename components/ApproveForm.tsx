@@ -10,8 +10,13 @@ import { ethers } from "ethers";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { getErrorMessage } from "@/lib/errors";
 
+interface ApproveFormData {
+    spender: string;
+    amount: string;
+}
+
 export default function ApproveForm() {
-    const { contract, isConnected } = useWeb3Store();
+    const { contract, isConnected, isPaused } = useWeb3Store();
     const [loading, setLoading] = useState(false);
     const [spender, setSpender] = useState("");
     const [amount, setAmount] = useState("");
@@ -19,6 +24,17 @@ export default function ApproveForm() {
     const handleApprove = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!contract) return;
+
+        if (isPaused) {
+            toast.error("Contract is currently paused");
+            return;
+        }
+
+        if (!ethers.isAddress(spender) || spender === ethers.ZeroAddress) {
+            toast.error("Invalid spender address");
+            return;
+        }
+
         try {
             setLoading(true);
             const formattedAmount = ethers.parseUnits(amount, 18);
@@ -30,6 +46,13 @@ export default function ApproveForm() {
             setAmount("");
         } catch (error: any) {
             console.error(error);
+            try {
+                const formattedAmount = ethers.parseUnits(amount, 18);
+                await contract.approve.staticCall(spender, formattedAmount);
+            } catch (staticError: any) {
+                toast.error(getErrorMessage(staticError));
+                return;
+            }
             toast.error(getErrorMessage(error));
         } finally {
             setLoading(false);

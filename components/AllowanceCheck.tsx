@@ -10,6 +10,11 @@ import { ethers } from "ethers";
 import { Eye, Loader2 } from "lucide-react";
 import { getErrorMessage } from "@/lib/errors";
 
+interface AllowanceFormData {
+    owner: string;
+    spender: string;
+}
+
 export default function AllowanceCheck() {
     const { contract, account, isConnected } = useWeb3Store();
     const [loading, setLoading] = useState(false);
@@ -35,7 +40,6 @@ export default function AllowanceCheck() {
         }
     };
 
-    // Pre-fill owner with connected account
     const fillMyAddress = () => {
         if (account) setOwner(account);
     };

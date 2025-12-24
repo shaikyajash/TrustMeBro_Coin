@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 
 interface Web3State {
     account: string | null;
+    availableAccounts: string[];
     balance: string;
     isConnected: boolean;
     isConnecting: boolean;
@@ -15,10 +16,12 @@ interface Web3State {
     connectWallet: () => Promise<void>;
     disconnectWallet: () => void;
     refreshBalance: () => Promise<void>;
+    switchAccount: (address: string) => Promise<void>;
 }
 
 export const useWeb3Store = create<Web3State>((set, get) => ({
     account: null,
+    availableAccounts: [],
     balance: '0',
     isConnected: false,
     isConnecting: false,
@@ -40,60 +43,56 @@ export const useWeb3Store = create<Web3State>((set, get) => ({
         set({ isConnecting: true });
 
         try {
-            // Request accounts - this triggers the popup
             await ethereum.request({ method: 'eth_requestAccounts' });
         } catch (err: any) {
             console.error("User rejected connection:", err);
             toast.error('Connection cancelled');
             set({ isConnecting: false });
-            return; // Exit early
+            return;
         }
 
         try {
             const provider = new ethers.BrowserProvider(ethereum);
             const network = await provider.getNetwork();
 
-            // Sepolia Chain ID is 11155111 (0xaa36a7)
             if (network.chainId !== BigInt(11155111)) {
                 try {
                     await ethereum.request({
                         method: 'wallet_switchEthereumChain',
                         params: [{ chainId: '0xaa36a7' }],
                     });
-                    // If switch is successful, the code will continue below with the new chain.
-                    // No need for a separate `newProvider` block here.
                 } catch (switchError: any) {
-                    // This error code indicates that the chain has not been added to MetaMask.
                     if (switchError.code === 4902) {
                         toast.error('Please add Sepolia network to MetaMask');
                     } else {
                         toast.error('Failed to switch to Sepolia');
                     }
-                    set({ isConnecting: false }); // Stop connecting if switch fails
-                    return; // Exit connectWallet if chain switch fails
+                    set({ isConnecting: false });
+                    return;
                 }
             }
 
-            // Re-initialize provider after switch or if no switch was needed, to ensure it's on the correct network
             const currentProvider = new ethers.BrowserProvider(ethereum);
+            const accounts = await currentProvider.listAccounts();
             const signer = await currentProvider.getSigner();
             const address = await signer.getAddress();
 
             const contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
 
-            // Fetch owner and paused status
             let ownerAddress: string | null = null;
             let pausedStatus = false;
             try {
                 ownerAddress = await contract.owner();
                 pausedStatus = await contract.paused();
             } catch (e) {
-                console.error("Failed to fetch contract metadata (owner/paused)", e);
-                // Continue without owner/paused if fetching fails, or handle as critical error
+                console.error("Failed to fetch contract metadata", e);
             }
+
+            const availableAccounts = accounts.map(acc => acc.address);
 
             set({
                 account: address,
+                availableAccounts,
                 isConnected: true,
                 provider: currentProvider,
                 contract,
@@ -101,12 +100,19 @@ export const useWeb3Store = create<Web3State>((set, get) => ({
                 isPaused: pausedStatus
             });
 
+            ethereum.on('accountsChanged', async (newAccounts: string[]) => {
+                if (newAccounts.length === 0) {
+                    get().disconnectWallet();
+                } else {
+                    await get().switchAccount(newAccounts[0]);
+                }
+            });
+
             await get().refreshBalance();
             toast.success('Wallet Connected!');
 
         } catch (error: any) {
             console.error("Wallet connection error:", error);
-            // Handle user rejection - check multiple patterns
             if (error.code === 4001 || error.code === 'ACTION_REJECTED' || error?.info?.error?.code === 4001) {
                 toast.error('Connection cancelled');
             } else if (error.message?.includes('rejected') || error.message?.includes('denied')) {
@@ -114,15 +120,53 @@ export const useWeb3Store = create<Web3State>((set, get) => ({
             } else {
                 toast.error(error.shortMessage || error.message || 'Failed to connect');
             }
-            set({ isConnecting: false }); // Explicitly reset here too
+            set({ isConnecting: false });
         } finally {
             set({ isConnecting: false });
         }
     },
 
+    switchAccount: async (address: string) => {
+        const { provider } = get();
+        if (!provider) return;
+
+        try {
+            const signer = await provider.getSigner(address);
+            const contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
+
+            let ownerAddress: string | null = null;
+            let pausedStatus = false;
+            try {
+                ownerAddress = await contract.owner();
+                pausedStatus = await contract.paused();
+            } catch (e) {
+                console.error("Failed to fetch contract metadata", e);
+            }
+
+            set({
+                account: address,
+                contract,
+                owner: ownerAddress,
+                isPaused: pausedStatus
+            });
+
+            await get().refreshBalance();
+            toast.success('Account switched!');
+        } catch (error) {
+            console.error("Failed to switch account:", error);
+            toast.error('Failed to switch account');
+        }
+    },
+
     disconnectWallet: () => {
+        const ethereum = (window as any).ethereum;
+        if (ethereum) {
+            ethereum.removeAllListeners('accountsChanged');
+        }
+
         set({
             account: null,
+            availableAccounts: [],
             isConnected: false,
             contract: null,
             provider: null,
@@ -139,11 +183,11 @@ export const useWeb3Store = create<Web3State>((set, get) => ({
 
         try {
             const balance = await contract.balanceOf(account);
-            const decimals = await contract.decimals(); // Should be 18
-            const paused = await contract.paused(); // Fetch paused status
+            const decimals = await contract.decimals();
+            const paused = await contract.paused();
             set({
                 balance: ethers.formatUnits(balance, decimals),
-                isPaused: paused // Update paused status
+                isPaused: paused
             });
         } catch (error) {
             console.error("Failed to fetch balance or paused status", error);

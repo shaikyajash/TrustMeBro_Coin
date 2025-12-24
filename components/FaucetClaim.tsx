@@ -4,26 +4,41 @@ import { useWeb3Store } from "@/store/useWeb3Store";
 import { Button } from "./ui/button";
 import { toast } from "sonner";
 import { useState } from "react";
+import { ethers } from "ethers";
 import { Coins, Loader2 } from "lucide-react";
 import { getErrorMessage } from "@/lib/errors";
 
 export default function FaucetClaim() {
-    const { contract, refreshBalance, isConnected, account } = useWeb3Store();
+    const { contract, refreshBalance, isConnected, account, isPaused } = useWeb3Store();
     const [loading, setLoading] = useState(false);
 
     const handleClaim = async () => {
         if (!contract || !account) return;
+
+        if (isPaused) {
+            toast.error("Contract is currently paused");
+            return;
+        }
+
         try {
             setLoading(true);
 
-            // Step 1: Check if user has already claimed
+            const cap = await contract.cap();
+            const totalSupply = await contract.totalSupply();
+            const faucetAmount = ethers.parseUnits("10", 18);
+
+            if (totalSupply + faucetAmount > cap) {
+                toast.error("Faucet would exceed token cap");
+                setLoading(false);
+                return;
+            }
+
             const hasClaimed = await contract.hasClaimedFaucet(account);
             if (hasClaimed) {
                 toast.error("You have already claimed from the faucet");
                 return;
             }
 
-            // Step 2: Execute the actual transaction
             const tx = await contract.claimFaucet();
             toast.info("Transaction sent! Waiting for confirmation...");
             await tx.wait();
@@ -31,6 +46,12 @@ export default function FaucetClaim() {
             await refreshBalance();
         } catch (error: any) {
             console.error(error);
+            try {
+                await contract.claimFaucet.staticCall();
+            } catch (staticError: any) {
+                toast.error(getErrorMessage(staticError));
+                return;
+            }
             toast.error(getErrorMessage(error));
         } finally {
             setLoading(false);
